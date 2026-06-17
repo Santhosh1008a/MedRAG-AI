@@ -1,0 +1,54 @@
+# Virtual environment
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Hugging Face cache
+.cache/
+huggingface/
+
+# Logs
+*.log
+
+# Temporary files
+temp/
+tmp/
+
+# Model files
+*.bin
+*.safetensors
+
+# Local vector database
+faiss_index/
+
+# Uploaded documents
+uploads/
+
+# Generated files
+*.zip
+
+# Evaluation outputs
+results/
+reports/
+
+# Ignore lock file if too large (optional)
+# requirements-lock.txt
