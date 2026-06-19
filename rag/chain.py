@@ -1,3 +1,4 @@
+import os
 from typing import List, Dict, Any, Tuple
 from langchain_core.documents import Document
 from models.llm import GroqLLM
@@ -6,6 +7,13 @@ from rag.memory import ConversationMemory
 from rag.prompt import QA_PROMPT, REWRITE_PROMPT, MAP_PROMPT, REDUCE_PROMPT
 from loaders.pdf_loader import load_multiple_pdfs
 from chunking.splitter import split_documents
+from utils.file_registry import (
+    compute_file_hash,
+    load_registry,
+    register_file,
+    is_duplicate,
+    clear_registry,
+)
 import time
 
 class RAGChain:
@@ -32,26 +40,78 @@ class RAGChain:
             print("Groq Llama 3.1 8B initialized.")
 
     def index_documents(self, filepaths: List[str]) -> Dict[str, Any]:
-        """Loads PDFs, chunks them, and stores them in the FAISS vector database."""
-        docs = load_multiple_pdfs(filepaths)
-        if not docs:
-            raise ValueError("Could not extract text from the provided PDFs.")
-            
-        self.indexed_documents.extend(docs)
-        
-        chunks = split_documents(docs)
-        
+        """
+        Hash-guarded ingestion pipeline.
+
+        For every supplied filepath:
+        1. Compute SHA-256 hash.
+        2. Look up hash in the on-disk registry.
+        3. Skip the file (no chunking, no embedding, no FAISS insertion) if
+           it has already been indexed.
+        4. Otherwise: load → chunk → embed → insert into FAISS → register.
+
+        Returns a summary dict with per-file status so callers can build
+        informative UI messages.
+        """
+        registry = load_registry()
+
+        skipped: List[str] = []
+        indexed: List[str] = []
+        total_new_chunks = 0
+
         vectorstore = self.retriever.vectorstore
-        if vectorstore.vectorstore is None:
-            vectorstore.create_index(chunks)
-        else:
-            vectorstore.vectorstore.add_documents(chunks)
-            
-        vectorstore.save_index()
-        
+
+        for filepath in filepaths:
+            filename = os.path.basename(filepath)
+            file_hash = compute_file_hash(filepath)
+
+            if is_duplicate(registry, file_hash):
+                skipped.append(filename)
+                continue
+
+            # --- New file: run the full ingestion pipeline ---
+            docs = load_multiple_pdfs([filepath])
+            if not docs:
+                # Non-extractable PDF; skip silently rather than aborting the
+                # whole batch.
+                skipped.append(filename)
+                continue
+
+            self.indexed_documents.extend(docs)
+            chunks = split_documents(docs)
+
+            if vectorstore.vectorstore is None:
+                vectorstore.create_index(chunks)
+            else:
+                vectorstore.vectorstore.add_documents(chunks)
+
+            vectorstore.save_index()
+
+            # Persist hash → metadata so subsequent uploads are detected.
+            register_file(registry, file_hash, filename, len(chunks))
+
+            indexed.append(filename)
+            total_new_chunks += len(chunks)
+
+        # --- Build a human-readable summary message ---
+        parts: List[str] = []
+        if indexed:
+            parts.append(
+                f"Indexed {len(indexed)} new file(s) into {total_new_chunks} chunk(s): "
+                + ", ".join(indexed)
+            )
+        if skipped:
+            parts.append(
+                f"Skipped {len(skipped)} duplicate file(s): " + ", ".join(skipped)
+            )
+        if not parts:
+            parts.append("No files were processed.")
+
         return {
-            "message": f"Successfully indexed {len(filepaths)} documents into {len(chunks)} chunks.",
-            "num_chunks": len(chunks)
+            "message": " | ".join(parts),
+            "num_new_chunks": total_new_chunks,
+            "indexed": indexed,
+            "skipped": skipped,
         }
 
     def rewrite_query(self, query: str) -> str:
@@ -136,3 +196,41 @@ class RAGChain:
         final_summary = self.langchain_llm.invoke(reduce_prompt_text)
         final_text = final_summary.content if hasattr(final_summary, 'content') else str(final_summary)
         return final_text.strip()
+
+
+# ---------------------------------------------------------------------------
+# Module-level utility — does NOT touch LLM, memory, or retriever wiring
+# ---------------------------------------------------------------------------
+
+def reset_vector_store(rag_chain: "RAGChain") -> None:
+    """
+    Hard-reset the vector database.
+
+    Actions performed (in order):
+    1. Delete every file inside the FAISS index directory.
+    2. Remove the processed-files registry (processed_files.json).
+    3. Set the in-memory vectorstore to None.
+    4. Clear the cached list of indexed documents.
+
+    The Groq LLM, conversation memory, embeddings model, reranker, and all
+    UI components are left entirely unaffected.
+
+    Args:
+        rag_chain: The live RAGChain instance to reset.
+    """
+    vs_wrapper = rag_chain.retriever.vectorstore
+    index_path = vs_wrapper.index_path
+
+    # 1. Delete FAISS index files from disk
+    if os.path.isdir(index_path):
+        for fname in os.listdir(index_path):
+            fpath = os.path.join(index_path, fname)
+            if os.path.isfile(fpath):
+                os.remove(fpath)
+
+    # 2. Delete the hash registry
+    clear_registry()
+
+    # 3. Reset in-memory state
+    vs_wrapper.vectorstore = None
+    rag_chain.indexed_documents = []

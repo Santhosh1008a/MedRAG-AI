@@ -8,6 +8,8 @@ from reranker.cross_encoder import CrossEncoderReranker
 from rag.retriever import AdvancedRetriever
 from rag.memory import ConversationMemory
 from rag.chain import RAGChain
+from utils.file_registry import clear_registry
+from rag.chain import reset_vector_store as _reset_vs
 
 # ==========================================
 # Shared RAG Core Initialization
@@ -141,8 +143,21 @@ def upload_files(files):
     try:
         filepaths = [f.name for f in files]
         result = rag_chain.index_documents(filepaths)
-        msg = f"✅ {result['message']}"
-        return msg, update_metrics_html()
+
+        # Build a clear status line for the UI
+        lines = []
+        if result["indexed"]:
+            lines.append(f"✅ Indexed {len(result['indexed'])} file(s) → {result['num_new_chunks']} chunk(s)")
+            for name in result["indexed"]:
+                lines.append(f"   • {name}")
+        if result["skipped"]:
+            lines.append(f"⚠️ Skipped {len(result['skipped'])} duplicate file(s) (already indexed)")
+            for name in result["skipped"]:
+                lines.append(f"   • {name}")
+        if not result["indexed"] and not result["skipped"]:
+            lines.append("ℹ️ No files were processed.")
+
+        return "\n".join(lines), update_metrics_html()
     except Exception as e:
         return f"❌ Error: {str(e)}", update_metrics_html()
 
@@ -150,31 +165,72 @@ def clear_index():
     try:
         rag_chain.retriever.vectorstore.vectorstore = None
         rag_chain.indexed_documents = []
-        return "✅ Index cleared from memory.", update_metrics_html()
+        clear_registry()  # Remove processed_files.json so hashes are no longer treated as duplicates
+        return "✅ Index and file registry cleared.", update_metrics_html()
     except Exception as e:
         return f"❌ Error: {str(e)}", update_metrics_html()
 
+def reset_db():
+    """Full hard reset: wipe FAISS files, registry, and in-memory state. Used by Metrics tab."""
+    try:
+        _reset_vs(rag_chain)
+        return (
+            "✅ Vector database cleared. Total vectors: 0. Upload new PDFs to rebuild.",
+            update_metrics_html(),
+            gr.update(visible=False),   # hide confirm row again
+            False,                      # reset confirm_state
+        )
+    except Exception as e:
+        return (
+            f"❌ Reset failed: {str(e)}",
+            update_metrics_html(),
+            gr.update(visible=False),
+            False,
+        )
+
+def clear_vector_database():
+    """Full hard reset used by the Upload Documents tab button."""
+    try:
+        _reset_vs(rag_chain)
+        return (
+            "✅ Vector database cleared. Total vectors: 0.  Re-upload PDFs to rebuild.",
+            update_metrics_html(),
+            gr.update(visible=False),
+            False,
+        )
+    except Exception as e:
+        return (
+            f"❌ Clear failed: {str(e)}",
+            update_metrics_html(),
+            gr.update(visible=False),
+            False,
+        )
+
 def ask_question(query, history):
+    """Generator: yields (chatbot, context_panel, metrics, cleared_msg) on each token."""
     if not query.strip():
-        yield history, "<div class='glass-card'>Please enter a question.</div>", update_metrics_html()
+        yield history, "<div class='glass-card'>Please enter a question.</div>", update_metrics_html(), query
         return
-        
+
+    # Clear the textbox immediately so the user can start typing the next question
+    cleared_msg = ""
+
     if rag_chain.retriever.vectorstore.vectorstore is None:
         history.append({"role": "user", "content": query})
         history.append({"role": "assistant", "content": "❌ Error: No documents indexed. Please upload documents first."})
-        yield history, "<div class='glass-card'>No documents indexed.</div>", update_metrics_html()
+        yield history, "<div class='glass-card'>No documents indexed.</div>", update_metrics_html(), cleared_msg
         return
-        
+
     history.append({"role": "user", "content": query})
     history.append({"role": "assistant", "content": ""})
-    
+
     try:
         start_time = time.time()
         response_data = rag_chain.ask(query, stream=True)
-        
+
         context_docs = response_data["context_docs"]
         sq = response_data["standalone_query"]
-        
+
         # Format Explainability
         context_display = f"""
         <div class='glass-card'>
@@ -183,14 +239,14 @@ def ask_question(query, history):
             <p><strong>Chunks Retrieved:</strong> {len(context_docs)}</p>
         </div>
         """
-        
+
         for i, (doc, score) in enumerate(context_docs):
             source = doc.metadata.get('filename', 'Unknown')
             page = doc.metadata.get('page', 'Unknown')
-            # Assuming score is cosine similarity or we normalize it roughly. 
+            # Assuming score is cosine similarity or we normalize it roughly.
             # We'll just display a bar based on the score * 100 if it's <=1, else bounded.
             bar_width = max(0, min(100, score * 100)) if score <= 1 else 100
-            
+
             context_display += f"""
             <div class='glass-card'>
                 <h4>Chunk {i+1} <span style='color: #94a3b8; font-weight: normal;'>(Source: {source}, Page: {page})</span></h4>
@@ -199,24 +255,24 @@ def ask_question(query, history):
                 <div class='chunk-text'>{doc.page_content}</div>
             </div>
             """
-            
+
         full_answer = ""
         streamer = response_data["streamer"]
-        
+
         for text in streamer:
             full_answer += text
             history[-1] = {"role": "assistant", "content": full_answer}
-            yield history, context_display, update_metrics_html(time.time() - start_time)
-            
+            yield history, context_display, update_metrics_html(time.time() - start_time), cleared_msg
+
         rag_chain.memory.add_user_message(query)
         rag_chain.memory.add_assistant_message(full_answer.strip())
-        
+
         time_taken = time.time() - start_time
-        yield history, context_display, update_metrics_html(time_taken)
-                        
+        yield history, context_display, update_metrics_html(time_taken), cleared_msg
+
     except Exception as e:
         history[-1] = {"role": "assistant", "content": f"Error: {str(e)}"}
-        yield history, f"<div class='glass-card'>An error occurred: {str(e)}</div>", update_metrics_html()
+        yield history, f"<div class='glass-card'>An error occurred: {str(e)}</div>", update_metrics_html(), cleared_msg
 
 def generate_summary_ui():
     try:
@@ -272,9 +328,24 @@ with gr.Blocks(title="MedRAG AI") as demo:
                     gr.Markdown("### Index your medical documents securely")
                     file_upload = gr.File(file_count="multiple", file_types=[".pdf"], label="Drag and drop PDFs here")
                     with gr.Row():
-                        upload_button = gr.Button("Index Documents", variant="primary")
-                        clear_index_button = gr.Button("Clear Index")
+                        upload_button        = gr.Button("Index Documents",      variant="primary")
+                        clear_index_button   = gr.Button("Clear Index")
+                        clear_vdb_btn_upload = gr.Button("🗑️ Clear Vector Database", variant="stop")
                     upload_status = gr.Textbox(label="Status", interactive=False)
+
+                    # Inline confirmation for the Upload-tab Clear Vector Database button
+                    upload_confirm_state = gr.State(False)
+                    with gr.Row(visible=False) as upload_confirm_row:
+                        gr.HTML(
+                            "<div style='color:#fbbf24; padding:10px; border:1px solid #fbbf24; "
+                            "border-radius:8px; background:rgba(251,191,36,0.08);'>"
+                            "⚠️ <strong>Are you sure?</strong> This permanently deletes ALL "
+                            "vectors and embeddings from disk. You will need to re-upload your PDFs."
+                            "</div>"
+                        )
+                        upload_confirm_yes = gr.Button("✅ Yes, Clear Everything", variant="stop")
+                        upload_confirm_no  = gr.Button("Cancel")
+
                 with gr.Column(scale=1):
                     upload_metrics_panel = gr.HTML(value=update_metrics_html())
             
@@ -298,6 +369,32 @@ with gr.Blocks(title="MedRAG AI") as demo:
         with gr.TabItem("📊 Metrics"):
             metrics_panel = gr.HTML(value=update_metrics_html())
 
+            gr.HTML("<hr style='border-color: rgba(239,68,68,0.3); margin: 30px 0;'>")
+            gr.Markdown("### ⚠️ Danger Zone")
+            gr.Markdown(
+                "**Reset Vector Database** permanently deletes all FAISS index files, "
+                "metadata, and the processed-files registry from disk. "
+                "The LLM, chat history, and UI are unaffected. "
+                "You will need to re-upload your PDFs after reset."
+            )
+
+            reset_status = gr.Textbox(label="Reset Status", interactive=False, visible=False)
+
+            # First click reveals a confirmation row; second click executes the reset.
+            confirm_state = gr.State(False)
+            reset_btn = gr.Button("🗑️ Clear Vector Database", variant="stop")
+
+            with gr.Row(visible=False) as confirm_row:
+                gr.HTML(
+                    "<div style='color:#fbbf24; padding:10px; border:1px solid #fbbf24; "
+                    "border-radius:8px; background:rgba(251,191,36,0.08);'>"
+                    "⚠️ <strong>Are you sure?</strong> This will permanently delete all "
+                    "vectors and cannot be undone."
+                    "</div>"
+                )
+                confirm_yes = gr.Button("✅ Yes, Clear Everything", variant="stop")
+                confirm_no  = gr.Button("Cancel")
+
     # Footer
     gr.HTML("""
     <div style='text-align: center; margin-top: 50px; padding: 20px; border-top: 1px solid rgba(255,255,255,0.1); color: #64748b;'>
@@ -308,17 +405,56 @@ with gr.Blocks(title="MedRAG AI") as demo:
     # Event Handlers
     upload_button.click(upload_files, inputs=[file_upload], outputs=[upload_status, upload_metrics_panel])
     upload_button.click(update_metrics_html, outputs=[metrics_panel])
-    
+
     clear_index_button.click(clear_index, outputs=[upload_status, upload_metrics_panel])
     clear_index_button.click(update_metrics_html, outputs=[metrics_panel])
-    
-    # We update metrics on both the chat page and metrics page
-    msg.submit(ask_question, inputs=[msg, chatbot], outputs=[chatbot, context_panel, metrics_panel])
-    submit_btn.click(ask_question, inputs=[msg, chatbot], outputs=[chatbot, context_panel, metrics_panel])
-    
+
+    # --- Upload-tab Clear Vector Database (two-step confirmation) ---
+    clear_vdb_btn_upload.click(
+        fn=lambda: (gr.update(visible=True), True),
+        outputs=[upload_confirm_row, upload_confirm_state],
+    )
+    upload_confirm_no.click(
+        fn=lambda: (gr.update(visible=False), False),
+        outputs=[upload_confirm_row, upload_confirm_state],
+    )
+    upload_confirm_yes.click(
+        fn=clear_vector_database,
+        outputs=[upload_status, upload_metrics_panel, upload_confirm_row, upload_confirm_state],
+    ).then(update_metrics_html, outputs=[metrics_panel])
+
+    # Chat: auto-clear textbox via 4th output after Send / Enter
+    msg.submit(
+        ask_question,
+        inputs=[msg, chatbot],
+        outputs=[chatbot, context_panel, metrics_panel, msg],
+    )
+    submit_btn.click(
+        ask_question,
+        inputs=[msg, chatbot],
+        outputs=[chatbot, context_panel, metrics_panel, msg],
+    )
+
     clear_btn.click(clear_chat, outputs=[chatbot, metrics_panel])
-    
+
     summary_button.click(generate_summary_ui, outputs=[summary_output])
+
+    # --- Metrics-tab Clear Vector Database (two-step confirmation) ---
+    reset_btn.click(
+        fn=lambda: (gr.update(visible=True), gr.update(visible=True), True),
+        outputs=[confirm_row, reset_status, confirm_state],
+    )
+    confirm_no.click(
+        fn=lambda: (gr.update(visible=False), gr.update(visible=False, value=""), False),
+        outputs=[confirm_row, reset_status, confirm_state],
+    )
+    confirm_yes.click(
+        fn=reset_db,
+        outputs=[reset_status, metrics_panel, confirm_row, confirm_state],
+    ).then(
+        fn=lambda: gr.update(visible=True),
+        outputs=[reset_status],
+    )
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=7860, theme=theme, css=custom_css)

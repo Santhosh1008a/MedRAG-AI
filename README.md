@@ -1,3 +1,13 @@
+---
+title: MedRAG AI
+emoji: 🩺
+colorFrom: blue
+colorTo: indigo
+sdk: gradio
+sdk_version: 5.34.2
+app_file: app.py
+pinned: false
+---
 # 🏥 MedRAG AI
 
 MedRAG AI is a production-grade, privacy-preserving, local Retrieval-Augmented Generation (RAG) system built to act as a medical report Q&A assistant.
