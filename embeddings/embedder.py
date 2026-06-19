@@ -1,6 +1,6 @@
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
-def get_embeddings(model_name: str = "BAAI/bge-base-en-v1.5", device: str = "cpu") -> HuggingFaceBgeEmbeddings:
+def get_embeddings(model_name: str = "BAAI/bge-base-en-v1.5", device: str = "cpu") -> HuggingFaceEmbeddings:
     """
     Initializes and returns the BGE embeddings model.
     
@@ -15,7 +15,7 @@ def get_embeddings(model_name: str = "BAAI/bge-base-en-v1.5", device: str = "cpu
     model_kwargs = {"device": device}
     encode_kwargs = {"normalize_embeddings": True} # Normalizing helps with cosine similarity
     
-    return HuggingFaceBgeEmbeddings(
+    return HuggingFaceEmbeddings(
         model_name=model_name,
         model_kwargs=model_kwargs,
         encode_kwargs=encode_kwargs

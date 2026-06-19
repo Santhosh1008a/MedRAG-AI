@@ -246,7 +246,7 @@ theme = gr.themes.Soft(
     block_border_width="0px",
 )
 
-with gr.Blocks(theme=theme, css=custom_css, title="MedRAG AI") as demo:
+with gr.Blocks(title="MedRAG AI") as demo:
     # Header
     gr.HTML("""
     <div style='text-align: center; margin-bottom: 30px; margin-top: 20px;'>
@@ -319,4 +319,4 @@ with gr.Blocks(theme=theme, css=custom_css, title="MedRAG AI") as demo:
     summary_button.click(generate_summary_ui, outputs=[summary_output])
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7860, theme=theme, css=custom_css)
