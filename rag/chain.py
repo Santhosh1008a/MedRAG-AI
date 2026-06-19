@@ -1,6 +1,6 @@
 from typing import List, Dict, Any, Tuple
 from langchain_core.documents import Document
-from models.llm import Phi3MiniLLM
+from models.llm import GroqLLM
 from rag.retriever import AdvancedRetriever
 from rag.memory import ConversationMemory
 from rag.prompt import QA_PROMPT, REWRITE_PROMPT, MAP_PROMPT, REDUCE_PROMPT
@@ -26,10 +26,10 @@ class RAGChain:
     def ensure_llm(self):
         """Lazy loader for the LLM."""
         if self.llm_wrapper is None:
-            print("Initializing Phi-3 Mini...")
-            self.llm_wrapper = Phi3MiniLLM()
+            print("Initializing Groq Llama 3.1 8B...")
+            self.llm_wrapper = GroqLLM()
             self.langchain_llm = self.llm_wrapper.get_llm()
-            print("Phi-3 Mini initialized.")
+            print("Groq Llama 3.1 8B initialized.")
 
     def index_documents(self, filepaths: List[str]) -> Dict[str, Any]:
         """Loads PDFs, chunks them, and stores them in the FAISS vector database."""

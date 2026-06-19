@@ -1,3 +1,6 @@
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 from datasets import Dataset
 from ragas import evaluate
@@ -7,14 +10,12 @@ from ragas.metrics import (
     context_precision,
     context_recall,
 )
-from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings
-from models.llm import Phi3MiniLLM
+from models.llm import GroqLLM
 from embeddings.embedder import get_embeddings
 
 def evaluate_rag_offline(evaluation_data_path: str):
     """
-    Runs RAGAS evaluation locally using Phi-3 Mini.
+    Runs RAGAS evaluation locally using Groq Llama 3.1 8B.
     
     Explanation of Metrics:
     - Faithfulness: Measures if the answer can be inferred purely from the provided context (checks for hallucination).
@@ -32,9 +33,8 @@ def evaluate_rag_offline(evaluation_data_path: str):
         
     dataset = Dataset.from_dict(data)
     
-    print("Initializing Local Judge (Phi-3 Mini)...")
-    # For evaluation, we use the same quantized model to adhere to the "No OpenAI" and local execution requirements.
-    llm_wrapper = Phi3MiniLLM()
+    print("Initializing Judge (Groq)...")
+    llm_wrapper = GroqLLM()
     local_judge = llm_wrapper.get_llm()
     
     print("Initializing Local Embeddings (BGE Base)...")
