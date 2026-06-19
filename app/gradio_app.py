@@ -119,7 +119,7 @@ def update_metrics_html(time_taken=0.0):
             </div>
             <div>
                 <p style="color: #94a3b8; font-size: 0.9em; margin-bottom: 2px;">LLM Model</p>
-                <h3 style="margin: 0; font-size: 1.2em;">Phi-3 Mini</h3>
+                <h3 style="margin: 0; font-size: 1.2em;">Groq Llama 3.1 8B</h3>
             </div>
             <div>
                 <p style="color: #94a3b8; font-size: 0.9em; margin-bottom: 2px;">Memory State</p>
@@ -253,7 +253,7 @@ with gr.Blocks(theme=theme, css=custom_css, title="MedRAG AI") as demo:
         <h1 class='gradient-text' style='font-size: 3.5rem; font-weight: 800; margin-bottom: 10px; line-height: 1.2;'>🏥 MedRAG AI</h1>
         <h3 style='color: #94a3b8; font-weight: 400; margin-top: 0;'>Production-Grade Medical Report Understanding System</h3>
         <div style='margin-top: 20px;'>
-            <span class='badge'>🤖 Local LLM</span>
+            <span class='badge'>🤖 Groq API</span>
             <span class='badge'>🔍 Semantic Search</span>
             <span class='badge'>⚡ Reranking</span>
             <span class='badge'>📚 Multi-PDF</span>
