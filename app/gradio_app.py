@@ -160,11 +160,13 @@ def ask_question(query, history):
         return
         
     if rag_chain.retriever.vectorstore.vectorstore is None:
-        history.append((query, "❌ Error: No documents indexed. Please upload documents first."))
+        history.append({"role": "user", "content": query})
+        history.append({"role": "assistant", "content": "❌ Error: No documents indexed. Please upload documents first."})
         yield history, "<div class='glass-card'>No documents indexed.</div>", update_metrics_html()
         return
         
-    history.append((query, ""))
+    history.append({"role": "user", "content": query})
+    history.append({"role": "assistant", "content": ""})
     
     try:
         start_time = time.time()
@@ -203,7 +205,7 @@ def ask_question(query, history):
         
         for text in streamer:
             full_answer += text
-            history[-1] = (query, full_answer)
+            history[-1] = {"role": "assistant", "content": full_answer}
             yield history, context_display, update_metrics_html(time.time() - start_time)
             
         rag_chain.memory.add_user_message(query)
@@ -213,7 +215,7 @@ def ask_question(query, history):
         yield history, context_display, update_metrics_html(time_taken)
                         
     except Exception as e:
-        history[-1] = (query, f"Error: {str(e)}")
+        history[-1] = {"role": "assistant", "content": f"Error: {str(e)}"}
         yield history, f"<div class='glass-card'>An error occurred: {str(e)}</div>", update_metrics_html()
 
 def generate_summary_ui():

@@ -64,7 +64,8 @@ class RAGChain:
         prompt_text = REWRITE_PROMPT.format(chat_history=history_str, question=query)
         rewritten = self.langchain_llm.invoke(prompt_text)
         # Clean up output if the model rambles
-        return rewritten.strip().split("\n")[0]
+        content = rewritten.content if hasattr(rewritten, 'content') else str(rewritten)
+        return content.strip().split("\n")[0]
 
     def ask(self, query: str, stream: bool = True) -> Dict[str, Any]:
         """
@@ -101,7 +102,8 @@ class RAGChain:
             response_data["streamer"] = streamer
         else:
             answer = self.langchain_llm.invoke(prompt_text)
-            response_data["answer"] = answer.strip()
+            answer_text = answer.content if hasattr(answer, 'content') else str(answer)
+            response_data["answer"] = answer_text.strip()
             self.memory.add_user_message(query)
             self.memory.add_assistant_message(response_data["answer"])
             
@@ -124,11 +126,13 @@ class RAGChain:
         for doc in self.indexed_documents:
             map_prompt_text = MAP_PROMPT.format(text=doc.page_content)
             chunk_summary = self.langchain_llm.invoke(map_prompt_text)
-            intermediate_summaries.append(chunk_summary.strip())
+            chunk_text = chunk_summary.content if hasattr(chunk_summary, 'content') else str(chunk_summary)
+            intermediate_summaries.append(chunk_text.strip())
             
         # 2. Reduce phase
         combined_summaries = "\n\n".join(intermediate_summaries)
         reduce_prompt_text = REDUCE_PROMPT.format(text=combined_summaries)
         
         final_summary = self.langchain_llm.invoke(reduce_prompt_text)
-        return final_summary.strip()
+        final_text = final_summary.content if hasattr(final_summary, 'content') else str(final_summary)
+        return final_text.strip()
